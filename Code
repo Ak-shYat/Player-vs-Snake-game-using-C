@@ -1,0 +1,358 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <windows.h>
+#include <conio.h>
+
+
+// Define constants for arrow key codes
+#define KEY_UP 'w'
+#define KEY_DOWN 's'
+#define KEY_LEFT 'a'
+#define KEY_RIGHT 'd'
+#define KEY_UNDO 'u'
+#define EMPTY ' '
+
+// Define constants for game objects
+#define GOAL 0
+#define SNAKE 1
+#define PLAYER 2
+#define WALL 3
+
+struct coordinates {
+	int x;
+	int y;
+};
+
+struct Node {
+	struct coordinates data;
+	struct Node* next;
+};
+
+struct LinkedList {
+	struct Node* head;
+};
+
+void push(struct LinkedList* list, struct coordinates value) {
+	struct Node* newNode = (struct Node*)malloc(sizeof(struct Node));
+	newNode->data = value;
+	newNode->next = list->head;
+	list->head = newNode;
+}
+
+struct coordinates pop(struct LinkedList* list) {
+	struct coordinates value = {0, 0};
+	if (list->head) {
+		value = list->head->data;
+		struct Node* temp = list->head;
+		list->head = list->head->next;
+		free(temp);
+	}
+	return value;
+}
+
+int isEmpty(struct LinkedList* list) {
+	return list->head == NULL;
+}
+
+void clearList(struct LinkedList* list) {
+	while (!isEmpty(list)) {
+		pop(list);
+	}
+}
+struct Game {
+	struct coordinates player;
+	struct coordinates snake;
+	struct coordinates goal;
+	struct LinkedList moveHistory;
+	struct LinkedList moveSnakeHistory;
+};
+
+typedef enum { UP, DOWN, LEFT, RIGHT, UNDO, NONE } Direction;
+
+// Function to initialize the game grid
+void initializeGrid(int grid[][100], int width, int height, const int metadata[][3], int metadataSize) {
+	for (int i = 0; i < width; i++) {
+		for (int j = 0; j < height; j++) {
+			grid[i][j] = -1; // Initialize all cells to -1 (empty)
+		}
+	}
+
+	// Fill the grid based on the metadata
+	for (int i = 0; i < metadataSize; i++) {
+		int x = metadata[i][0];
+		int y = metadata[i][1];
+		int object = metadata[i][2];
+		grid[x][y] = object;
+	}
+}
+
+// Function to print the game grid
+void printGrid(int grid[][100], int width, int height) {
+	for (int j = 0; j < height + 2; j++) {
+		for (int i = 0; i < width + 2; i++) {
+			if ((i == 0 || i == width + 1) && (j == 0 || j == height + 1)) {
+				printf("#"); // Corner
+			} else if (i == 0 || i == width + 1) {
+				printf("| "); // Length
+			} else if (j == 0 || j == height + 1) {
+				printf("- "); // Breadth
+			} else {
+				switch (grid[i - 1][j - 1]) {
+					case PLAYER:
+						printf("^ ");
+						break;
+					case SNAKE:
+						printf("~ ");
+						break;
+					case GOAL:
+						printf("X ");
+						break;
+					case WALL:
+						printf("O ");
+						break;
+					default:
+						printf("  ");
+				}
+			}
+		}
+		printf("\n");
+	}
+}
+
+int checkWinCondition(int playerX, int playerY, int goalX, int goalY) {
+	// Check if the player reaches the GOAL
+	if (playerX == goalX && playerY == goalY) {
+		return 1; // Winning state
+	}
+	return 0; // Not a winning state
+}
+
+Direction moveSnake(struct Game* game) {
+	int x_diff = abs(game->snake.x - game->player.x);
+	int y_diff = abs(game->snake.y - game->player.y);
+
+	if (x_diff == 0 && y_diff == 0) return NONE;
+	
+	if (x_diff >= y_diff) {
+		if (game->snake.x > game->player.x) return UP;
+		else return DOWN;
+	}
+	
+	if (game->snake.y > game->player.y) return LEFT;
+	else return RIGHT;
+}
+
+void undo(int grid[][100], struct Game* game) {
+	if (!isEmpty(&(game->moveHistory))) {
+		printf("Undo Player\n");
+		struct coordinates prev1 = pop(&(game->moveHistory));
+		grid[game->player.x][game->player.y] = EMPTY;
+		game->player = prev1;
+		grid[game->player.x][game->player.y] = PLAYER;
+	}
+
+	if (!isEmpty(&(game->moveSnakeHistory))) {
+		printf("Undo Snake\n");
+		struct coordinates prev2 = pop(&(game->moveSnakeHistory));
+		grid[game->snake.x][game->snake.y] = EMPTY;
+		game->snake = prev2;
+		grid[game->snake.x][game->snake.y] = SNAKE;
+	}
+}
+
+int isValidPosition(int grid[][100], int width, int height, int x, int y) {
+	return (x >= 0 && x < width && y >= 0 && y < height && grid[x][y] != WALL);
+}
+
+int main(int argc, char *argv[]) {
+	// Determine the input file name
+	const char *inputFileName;
+	if (argc > 1) {
+		// Use the first argument as the file name
+		inputFileName = argv[1];
+	} else {
+		// Default file name
+		printf("Maze not specified, using Input_file.txt.\n");
+		inputFileName = "maze.txt";
+	}
+
+	// Read metadata from the file
+	FILE *file = fopen(inputFileName, "r");
+	if (file == NULL) {
+		printf("Failed to open the file: %s\n", inputFileName);
+		return 1;
+	}
+	 struct Game game;
+
+	int numObjects, width, height;
+
+	int metadata[100][3]; // Assuming a maximum of 100 metadata entries
+	int metadataSize = 0;
+
+	// Read the number of objects and the dimensions
+	if (fscanf(file, "%d %d %d", &numObjects, &width, &height) != 3) {
+		printf("Invalid file format. Expected number of objects and dimensions.\n");
+		fclose(file);
+		return 1;
+	}
+
+	// Read metadata from the file
+	while (fscanf(file, "%d %d %d", &metadata[metadataSize][0], &metadata[metadataSize][1], &metadata[metadataSize][2]) == 3) {
+		metadataSize++;
+	}
+
+	fclose(file);
+
+	int grid[100][100]; // Adjust the size based on your maximum expected dimensions
+
+	// Initialize the game grid
+	initializeGrid(grid, width, height, metadata, metadataSize);
+	
+	// Initialize variables for the player, goal, and snake
+	game.player.x = -1, game.player.y = -1;
+	game.goal.x = -1, game.goal.y = -1;
+	game.snake.x =-1 , game.snake.y = -1;
+
+	// Iterate through the metadata to initialize positions
+	for (int i = 0; i < metadataSize; i++) {
+		int x = metadata[i][0];
+		int y = metadata[i][1];
+		int objectType = metadata[i][2];
+
+		switch (objectType) {
+			case PLAYER:
+				game.player.x = x;
+				game.player.y = y;
+				break;
+			case GOAL:
+				game.goal.x = x;
+				game.goal.y= y;
+				break;
+			case SNAKE:
+				game.snake.x = x;
+				game.snake.y = y;
+				break;
+			// Add cases for other object types if necessary
+		}
+	}
+
+	// Check if all necessary objects are initialized
+	if (game.player.x == -1 || game.goal.x == -1 || game.snake.x == -1) {
+		printf("Error: Missing metadata for player, goal, or snake.\n");
+		return 1;
+	}
+
+	// Print the initial game state
+	printf("Initial game state:\n");
+	printGrid(grid, width, height);
+
+	// Game loop
+	int isGameover = 0;
+	int isWinningState = 0;
+	int playerReachedGoal = 0;
+
+	while (!isGameover) {
+		// Read player input (use a library like conio.h for keyboard input)
+		char input = _getch();
+
+		int newPlayerX = game.player.x;
+		int newPlayerY = game.player.y;
+		bool isUndo = false;
+
+		switch (input) {
+			case KEY_UP:
+				newPlayerY--;
+				break;
+			case KEY_DOWN:
+				newPlayerY++;
+				break;
+			case KEY_LEFT:
+				newPlayerX--;
+				break;
+			case KEY_RIGHT:
+				newPlayerX++;
+				break;
+			case KEY_UNDO:
+				undo(grid, &game);
+				isUndo = true;
+			default:
+				// Handle other input, if needed
+				break;
+		}
+
+		// Check if the new position is valid (within bounds and not blocked by walls)
+		if (!isUndo && isValidPosition(grid, width, height, newPlayerX, newPlayerY)) {
+			// Update the player's position
+			push(&game.moveHistory, game.player);
+			grid[game.player.x][game.player.y] = -1;  // Clear the previous position
+			game.player.x = newPlayerX;
+			game.player.y = newPlayerY;
+			grid[game.player.x][game.player.y] = PLAYER;  // Set the new position
+		}
+
+		// Update the snake's position
+		// In the game loop
+		if (!isUndo) {
+			Direction snakeDirection = moveSnake(&game);
+
+			int newSnakeX = game.snake.x;
+			int newSnakeY = game.snake.y;
+
+			switch (snakeDirection) {
+				case UP:
+					newSnakeX--;
+					break;
+				case DOWN:
+					newSnakeX++;
+					break;
+				case LEFT:
+					newSnakeY--;
+					break;
+				case RIGHT:
+					newSnakeY++;
+					break;
+				// case UNDO:
+			}
+
+			// Check if the new position is valid
+			if (isValidPosition(grid, width, height, newSnakeX, newSnakeY)) {
+				push(&game.moveSnakeHistory, game.snake);
+				grid[game.snake.x][game.snake.y] = -1;  // Clear the previous position
+				game.snake.x = newSnakeX;
+				game.snake.y = newSnakeY;
+				grid[game.snake.x][game.snake.y] = SNAKE;  // Set the new position
+			}
+		}
+
+		// Update and display the game state
+		system("cls");
+		printf("Current game state:\n");
+		printGrid(grid, width, height);
+
+		// Check for game over conditions
+		isWinningState = checkWinCondition(game.player.x, game.player.y, game.goal.x, game.goal.y);
+		if (isWinningState) {
+			isGameover = 1; // Player reached the GOAL
+			playerReachedGoal = 1;
+		}
+
+		// losing condition -> snake and player on same coords
+		if (game.player.x == game.snake.x && game.player.y == game.snake.y) {
+			isGameover = 1;
+		}
+
+		// Delay to control game speed
+		Sleep(50); // 50 milliseconds * 1000 = 50000 microseconds
+
+		if (isGameover) {
+			if (playerReachedGoal) {
+				printf("Congratulations! You reached the GOAL!\n");
+			} else {
+				printf("Game over! The snake got you!\n");
+			}
+		}
+	}
+
+	return 0;
+}
